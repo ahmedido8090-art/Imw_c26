@@ -10,6 +10,8 @@ import '../data/gem_stories.dart';
 import '../i18n/lang.dart';
 import '../i18n/strings.dart';
 import '../models/map_models.dart';
+import '../models/rostau.dart';
+import '../services/rostau.dart';
 import '../services/route_finder.dart';
 import '../services/search_engine.dart';
 import '../state/app_state.dart';
@@ -23,6 +25,7 @@ import '../widgets/map_control.dart';
 import '../widgets/museum_map_canvas.dart';
 import '../widgets/story_block.dart';
 import 'place_detail_sheet.dart';
+import 'rostau_sheet.dart';
 import 'search_page.dart';
 import 'tour_sheet.dart';
 import 'where_am_i_sheet.dart';
@@ -69,6 +72,9 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
   String? _routeTargetId;
   String _routeLabel = '';
   List<String>? _tourOrder;
+
+  /// The Rostau trip being walked (null for the pinned tour or a single route).
+  String? _tripId;
 
   int _resetTick = 0;
   int _zoomTick = 0;
@@ -153,6 +159,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
       'quarter': _quarter,
       'routeTarget': _routeTargetId,
       'tour': _tourOrder,
+      'trip': _tripId,
       'views': {
         for (final e in _views.entries)
           if (!e.value.value.isIdentity())
@@ -198,13 +205,14 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
     // bring the route (or tour) back once the first frame is up
     final target = Store.get('routeTarget');
     final tour = Store.get('tour');
+    final trip = Store.get('trip');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _originNode == null) return;
       if (tour is List && tour.isNotEmpty) {
         _startTour([
           for (final id in tour)
             if (id is String) id,
-        ], quiet: true);
+        ], quiet: true, tripId: trip is String && RostauLibrary.byId(trip) != null ? trip : null);
       } else if (target is String) {
         _routeTo(target, label: S.placeId(target), quiet: true);
       }
@@ -222,13 +230,16 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
       ? _map.places
       : _map.places.where((p) => p.category == _filter).toList();
 
-  /// The era chips only show the era's name and dates now: nothing on the plan is highlighted.
-  Set<String> get _highlightedIds => const <String>{};
+  /// The galleries of the era picked in the timeline.
+  Set<String> get _highlightedIds => _highlightGroup == null
+      ? const <String>{}
+      : {for (final r in _regions) if (r.group == _highlightGroup) r.id};
 
   // ── maps ───────────────────────────────────────────────────────
   void _setMap(String mapId) {
     final next = allMaps[mapId];
     if (next == null || next.id == _map.id) return;
+    _focusPoint = null;
     setState(() {
       _map = next;
       _regions = regionsFor(next.id);
@@ -297,6 +308,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black45,
       builder: (_) => PlaceDetailSheet(
@@ -304,13 +316,9 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
         isPinned: _pinned.contains(p.id),
         isRouteTarget: _routeTargetId == p.id,
         isOrigin: _originNode == p.id,
-        onPin: () {
-          setState(() {
-            if (!_pinned.remove(p.id)) _pinned.add(p.id);
-          });
-          Navigator.of(context).pop();
-          _showDetailSheet(p); // reopen so the button state refreshes
-        },
+        onPin: () => setState(() {
+          if (!_pinned.remove(p.id)) _pinned.add(p.id);
+        }),
         onRoute: () {
           Navigator.of(context).pop();
           _routeTo(p.id, label: S.place(p));
@@ -365,7 +373,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
                             Text(
                               S.region(r),
                               style: TextStyle(
-                                fontSize: 24,
+                                fontSize: 22,
                                 color: context.pal.ink,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -404,6 +412,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
     final r = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const WhereAmISheet(),
     );
@@ -460,7 +469,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
   void _replan() {
     if (_originNode == null) return;
     if (_tourOrder != null) {
-      _startTour(_tourOrder!, quiet: true);
+      _startTour(_tourOrder!, quiet: true, tripId: _tripId);
     } else if (_routeTargetId != null) {
       _routeTo(_routeTargetId!, label: _routeLabel, quiet: true);
     }
@@ -470,14 +479,21 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
   void _openSettings() {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => SafeArea(
+      builder: (context) => SafeArea(
         top: false,
-        child: _SettingsSheet(
-          onRotate: () {
-            Navigator.of(context).pop();
-            _rotateView();
-          },
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * .9,
+          ),
+          child: _SettingsSheet(
+            onRotate: () {
+              Navigator.of(context).pop();
+              _rotateView();
+            },
+          ),
         ),
       ),
     );
@@ -511,15 +527,25 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
       _tourOrder = null;
       _routeTargetId = destId;
       _routeLabel = label;
+      _tripId = null;
     });
-    _routeAnim.forward(from: 0);
+    _revealRoute();
     _focusRoute(r, quiet);
   }
 
-  void _startTour(List<String> ids, {bool quiet = false}) {
+  void _revealRoute() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _routeAnim.value = 1;
+    } else {
+      _routeAnim.forward(from: 0);
+    }
+  }
+
+  /// Walk [ids] as one route: the pinned tour, or the Rostau trip [tripId].
+  void _startTour(List<String> ids, {bool quiet = false, String? tripId}) {
     final from = _originNode;
     if (from == null) {
-      _askOrigin(then: () => _startTour(ids));
+      _askOrigin(then: () => _startTour(ids, tripId: tripId));
       return;
     }
     final t = _graph.tour(from, ids, avoidStairs: _app.avoidStairs);
@@ -536,9 +562,10 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
       _route = t.route;
       _tourOrder = t.order;
       _routeTargetId = null;
-      _routeLabel = S.t('my_tour');
+      _tripId = tripId;
+      _routeLabel = _tripTitle ?? S.t('my_tour');
     });
-    _routeAnim.forward(from: 0);
+    _revealRoute();
     _focusRoute(t.route, quiet);
     if (!quiet && t.skipped.isNotEmpty) {
       _toast.show(
@@ -554,11 +581,15 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
     if (!r.legs.any((l) => l.mapId == _map.id)) _setMap(r.legs.first.mapId);
   }
 
+  RostauTrip? get _trip => _tripId == null ? null : RostauLibrary.byId(_tripId!);
+  String? get _tripTitle => _trip?.titleIn(S.lang);
+
   void _clearRoute() {
     setState(() {
       _route = null;
       _routeTargetId = null;
       _tourOrder = null;
+      _tripId = null;
     });
     _routeAnim.reset();
   }
@@ -577,10 +608,11 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (_) => DirectionsSheet(
         title: _tourOrder != null
-            ? _routeLabel
+            ? (_tripTitle ?? _routeLabel)
             : S.t('route_to', x: _routeLabel),
         route: r,
         onStepTap: (s) {
@@ -599,6 +631,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (_) => TourSheet(
         graph: _graph,
@@ -614,6 +647,52 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
           Navigator.of(context).pop();
           _startTour(order);
         },
+        onSaveAsTrip: (ids) async {
+          Navigator.of(context).pop();
+          final trip = await Navigator.of(context).push(TripEditorPage.route(stops: ids));
+          if (trip is RostauTrip && mounted) {
+            _toast.show(S.t('trip_saved'), icon: Icons.check_circle_outline);
+            _openTrips();
+          }
+        },
+      ),
+    );
+  }
+
+  // ── Rostau trips ───────────────────────────────────────────────
+  /// The trips sheet; [tripId] opens it straight on one trip (after the
+  /// visitor chose where they start).
+  void _openTrips({String? tripId}) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => RostauSheet(
+        graph: _graph,
+        originId: _originNode,
+        pinnedCount: _pinned.length,
+        activeTripId: _tripId,
+        openTripId: tripId,
+        onOpenTour: () {
+          Navigator.of(context).pop();
+          _openTour();
+        },
+        onChooseStart: (reopen) {
+          Navigator.of(context).pop();
+          _askOrigin(then: () => _openTrips(tripId: reopen));
+        },
+        onStart: (trip, order) {
+          Navigator.of(context).pop();
+          _startTour(order, tripId: trip.id);
+        },
+        onPlaceTap: (id) {
+          final place = placeById(id);
+          if (place == null) return;
+          Navigator.of(context).pop();
+          _selectPlace(place);
+        },
+        onMessage: (m) => _toast.show(m, icon: Icons.check_circle_outline),
       ),
     );
   }
@@ -648,7 +727,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
     final rtl = Directionality.of(context) == TextDirection.rtl;
     final gutter = tall ? 60.0 : 12.0;
     final screenW = MediaQuery.sizeOf(context).width;
-    // locate (46) + gap + zoom pill (89) + gap + fit (46), at end: 12, top: safe.top + 124
+    // locate (46) + gap + zoom pill (89) + gap + my tour (46), at end: 12, top: safe.top + 124
     final controlsRect = Rect.fromLTWH(
       rtl ? 12 : screenW - 12 - 46,
       safe.top + 124,
@@ -740,41 +819,50 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                padding: const EdgeInsets.only(top: 8),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(child: SearchPill(onTap: _openSearch)),
-                        const SizedBox(width: 8),
-                        RoundAction(
-                          tooltip: S.t('settings'),
-                          onTap: _openSettings,
-                          child: Icon(
-                            Icons.tune_rounded,
-                            size: 22,
-                            color: p.ink,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        children: [
+                          Expanded(child: SearchPill(onTap: _openSearch)),
+                          const SizedBox(width: 8),
+                          RoundAction(
+                            tooltip: S.t('settings'),
+                            onTap: _openSettings,
+                            child: Icon(
+                              Icons.tune_rounded,
+                              size: 22,
+                              color: p.ink,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        RoundAction(
-                          tooltip: S.t('my_tour'),
-                          onTap: _openTour,
-                          badge: _pinned.length,
-                          child: Icon(
-                            Icons.bookmarks_outlined,
-                            size: 22,
-                            color: p.ink,
+                          const SizedBox(width: 8),
+                          RoundAction(
+                            tooltip: S.t('trips'),
+                            onTap: _openTrips,
+                            active: _tripId != null,
+                            child: GlyphIcon(
+                              'wat',
+                              size: 24,
+                              color: _tripId != null ? p.onAccent : p.gold,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 10),
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 220),
                       child: _picking
-                          ? _pickBanner(p)
+                          ? Padding(
+                              key: const ValueKey('pick'),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              child: _pickBanner(p),
+                            )
                           : Align(
                               key: ValueKey('cat_${_map.id}'),
                               alignment: AlignmentDirectional.centerStart,
@@ -813,10 +901,15 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
                   outTip: S.t('zoom_out'),
                 ),
                 const SizedBox(height: 10),
-                MapControl(
-                  icon: Icons.fit_screen,
-                  tooltip: S.t('fit_map'),
-                  onTap: _resetView,
+                RoundAction(
+                  tooltip: S.t('my_tour'),
+                  onTap: _openTour,
+                  badge: _pinned.length,
+                  child: Icon(
+                    _pinned.isEmpty ? Icons.bookmarks_outlined : Icons.bookmarks,
+                    size: 22,
+                    color: p.accent,
+                  ),
                 ),
               ],
             ),
@@ -854,7 +947,10 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
                     onTap: () => _setMap(parent),
                   )
                 else
-                  _MapSwitcher(currentMapId: _map.id, onSwitch: _setMap),
+                  _MapSwitcher(
+                    currentMapId: _map.id,
+                    onSwitch: (id) => id == _map.id ? _resetView() : _setMap(id),
+                  ),
               ],
             ),
           ),
@@ -862,8 +958,8 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
           // ── toast ──
           Positioned(
             top: safe.top + 116,
-            left: 28,
-            right: 28,
+            left: 12 + 46 + 12,
+            right: 12 + 46 + 12,
             child: IgnorePointer(
               child: Center(child: GemToastHost(toast: _toast.value)),
             ),
@@ -874,8 +970,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
   }
 
   Widget _pickBanner(GemPalette p) => Container(
-    key: const ValueKey('pick'),
-    height: 44,
+    constraints: const BoxConstraints(minHeight: 44),
     padding: const EdgeInsetsDirectional.only(start: 14, end: 4),
     decoration: BoxDecoration(
       color: p.accent,
@@ -918,8 +1013,15 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
   Widget _routeCard(GemPalette p) {
     final r = _route!;
     final title = _tourOrder != null
-        ? '${S.t('tour')} · ${S.t('stops', n: _tourOrder!.length)}'
+        // a trip by its title alone ("The Great House"), so it fits the card
+        ? (_trip == null ? S.t('tour') : splitTripTitle(_trip!, S.lang).$2)
         : S.t('to_x', x: _routeLabel);
+    // the stop count lives with the distance, where a long title cannot hide it
+    final meta = [
+      if (_tourOrder != null) S.count('stops', _tourOrder!.length),
+      S.distance(r.meters),
+      S.minutes(r.walkTime),
+    ].join(' · ');
     return Container(
       decoration: BoxDecoration(
         color: p.surface,
@@ -957,7 +1059,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontFamily: 'Arial',
-                          fontSize: 15,
+                          fontSize: 16,
                           color: p.ink,
                           fontWeight: FontWeight.w800,
                         ),
@@ -967,12 +1069,12 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
                         children: [
                           Flexible(
                             child: Text(
-                              '${S.distance(r.meters)} · ${S.minutes(r.walkTime)}',
+                              meta,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontFamily: 'Arial',
-                                fontSize: 12.5,
+                                fontSize: 12,
                                 color: p.muted,
                               ),
                             ),
@@ -990,6 +1092,7 @@ class _MuseumMapScreenState extends State<MuseumMapScreen>
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 FilledButton(
                   onPressed: _openDirections,
                   style: gemFilled(context).copyWith(
@@ -1069,57 +1172,66 @@ class _MapSwitcher extends StatelessWidget {
           border: Border.all(color: p.line.withValues(alpha: .8)),
           boxShadow: gemShadow(p, lift: 1.2),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final m in maps)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onSwitch(m.id),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: m.id == currentMapId ? p.accent : Colors.transparent,
+        // the tabs' ink needs a Material above the pill's colour
+        child: Material(
+          type: MaterialType.transparency,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final m in maps)
+                Semantics(
+                  button: true,
+                  selected: m.id == currentMapId,
+                  hint: m.id == currentMapId ? S.t('fit_hint') : null,
+                  child: InkWell(
+                    onTap: () => onSwitch(m.id),
                     borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _icon(m.id),
-                        size: 19,
-                        color: m.id == currentMapId ? p.onAccent : p.muted,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        S.mapShort(m),
-                        style: TextStyle(
-                          fontFamily: 'Arial',
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: m.id == currentMapId ? p.onAccent : p.ink,
-                        ),
+                      decoration: BoxDecoration(
+                        color: m.id == currentMapId ? p.accent : Colors.transparent,
+                        borderRadius: BorderRadius.circular(24),
                       ),
-                      Text(
-                        S.levelTag(m),
-                        style: TextStyle(
-                          fontFamily: 'Arial',
-                          fontSize: 9.5,
-                          color: m.id == currentMapId
-                              ? p.onAccent.withValues(alpha: .75)
-                              : p.muted,
-                        ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _icon(m.id),
+                            size: 19,
+                            color: m.id == currentMapId ? p.onAccent : p.muted,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            S.mapShort(m),
+                            style: TextStyle(
+                              fontFamily: 'Arial',
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: m.id == currentMapId ? p.onAccent : p.ink,
+                            ),
+                          ),
+                          Text(
+                            S.levelTag(m),
+                            style: TextStyle(
+                              fontFamily: 'Arial',
+                              fontSize: 12,
+                              color: m.id == currentMapId
+                                  ? p.onAccent.withValues(alpha: .75)
+                                  : p.muted,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1280,7 +1392,7 @@ class _SettingsSheet extends StatelessWidget {
                   style: TextStyle(
                     fontFamily: 'Arial',
                     fontWeight: FontWeight.w800,
-                    fontSize: 15,
+                    fontSize: 16,
                     color: p.ink,
                   ),
                 ),
@@ -1288,7 +1400,7 @@ class _SettingsSheet extends StatelessWidget {
                   S.t('step_free_hint'),
                   style: TextStyle(
                     fontFamily: 'Arial',
-                    fontSize: 12.5,
+                    fontSize: 12,
                     color: p.muted,
                   ),
                 ),
@@ -1304,7 +1416,7 @@ class _SettingsSheet extends StatelessWidget {
                   style: TextStyle(
                     fontFamily: 'Arial',
                     fontWeight: FontWeight.w800,
-                    fontSize: 15,
+                    fontSize: 16,
                     color: p.ink,
                   ),
                 ),
@@ -1312,7 +1424,7 @@ class _SettingsSheet extends StatelessWidget {
                   S.t('about_hint'),
                   style: TextStyle(
                     fontFamily: 'Arial',
-                    fontSize: 12.5,
+                    fontSize: 12,
                     color: p.muted,
                   ),
                 ),
@@ -1326,7 +1438,7 @@ class _SettingsSheet extends StatelessWidget {
                   style: TextStyle(
                     fontFamily: 'Arial',
                     fontWeight: FontWeight.w800,
-                    fontSize: 15,
+                    fontSize: 16,
                     color: p.ink,
                   ),
                 ),
@@ -1334,7 +1446,7 @@ class _SettingsSheet extends StatelessWidget {
                   S.t('rotate_hint'),
                   style: TextStyle(
                     fontFamily: 'Arial',
-                    fontSize: 12.5,
+                    fontSize: 12,
                     color: p.muted,
                   ),
                 ),

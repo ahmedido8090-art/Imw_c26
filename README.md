@@ -8,6 +8,7 @@ tours, search and stories, in eight languages.
 flutter pub get
 flutter analyze
 flutter test
+flutter test integration_test/ux_walkthrough_test.dart -d <simulator>   # main journeys on a device
 python3 tools/test_nav.py      # routing-graph checks (needs numpy, scipy, scikit-image, Pillow, rsvg-convert)
 python3 tools/render_routes.py /tmp/routes   # sample routes drawn over the walls, per plan
 ```
@@ -93,8 +94,13 @@ language, and the visitor's own trips (`RostauLibrary`, saved with the app
 state; unknown or repeated places are dropped, damaged entries skipped).
 `RostauPlanner.plan` orders the stops into the shortest walk (the router's
 tour: nearest neighbour, 2-opt, never worse than the listed order) and lists
-the highlights the walk passes within 12 m that are not on the trip. The
-screens for browsing and editing trips are not built yet.
+the highlights the walk passes within 12 m that are not on the trip.
+
+The screens are in `lib/screens/rostau_sheet.dart`, opened from the button at
+the top end of the map (the N31 hieroglyph *wꜣt*, "road"; each curated trip
+shows the sign its Egyptian name was written with). A trip is planned from
+where the visitor said they are and started as one route; the visitor's own
+trips are made in the editor, or from the pinned tour ("Save as trip").
 
 ## Rendering
 

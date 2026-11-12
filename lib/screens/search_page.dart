@@ -9,13 +9,16 @@ import '../widgets/place_badge.dart';
 /// map names, and NUMBERS: "5" lists gallery 05, attraction 5, restaurant 5,
 /// shop 5… grouped by type. Pops with the chosen [SearchEntry].
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({super.key, this.placesOnly = false});
+
+  /// Only places (no halls), e.g. when adding stops to a trip.
+  final bool placesOnly;
 
   /// Fade + slight rise, to match the other transitions in the app.
-  static Route<SearchEntry> route() => PageRouteBuilder<SearchEntry>(
+  static Route<SearchEntry> route({bool placesOnly = false}) => PageRouteBuilder<SearchEntry>(
     transitionDuration: const Duration(milliseconds: 260),
     reverseTransitionDuration: const Duration(milliseconds: 200),
-    pageBuilder: (_, _, _) => const SearchPage(),
+    pageBuilder: (_, _, _) => SearchPage(placesOnly: placesOnly),
     transitionsBuilder: (_, anim, _, child) => FadeTransition(
       opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
       child: SlideTransition(
@@ -34,7 +37,7 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
-  final _all = SearchEngine.build();
+  late final _all = SearchEngine.build(regions: !widget.placesOnly);
   String _filter = 'all';
 
   @override
@@ -132,12 +135,12 @@ class _SearchPageState extends State<SearchPage> {
                     backgroundColor: p.surface,
                     side: BorderSide(color: on ? p.accent : p.line),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(20),
                     ),
                     labelStyle: TextStyle(
                       fontFamily: 'Arial',
                       fontWeight: FontWeight.w700,
-                      fontSize: 13,
+                      fontSize: 14,
                       color: on ? p.onAccent : p.ink,
                     ),
                   );
@@ -159,7 +162,7 @@ class _SearchPageState extends State<SearchPage> {
                             Padding(
                               padding: EdgeInsets.fromLTRB(20, 6, 20, 0),
                               child: Text(
-                                S.t('results_n', n: count),
+                                S.count('results_n', count),
                                 style: TextStyle(
                                   fontFamily: 'Arial',
                                   fontSize: 12,
@@ -197,7 +200,7 @@ class _SearchPageState extends State<SearchPage> {
             text.toUpperCase(),
             style: TextStyle(
               fontFamily: 'Arial',
-              fontSize: 11,
+              fontSize: 12,
               letterSpacing: S.tracking(1.6),
               color: p.gold,
               fontWeight: FontWeight.w800,
@@ -209,7 +212,7 @@ class _SearchPageState extends State<SearchPage> {
               '$count',
               style: TextStyle(
                 fontFamily: 'Arial',
-                fontSize: 11,
+                fontSize: 12,
                 color: p.muted,
                 fontWeight: FontWeight.w700,
               ),
@@ -271,14 +274,13 @@ class _SearchPageState extends State<SearchPage> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontFamily: 'Arial',
-                      fontSize: 12.5,
+                      fontSize: 12,
                       color: p.muted,
                     ),
                   ),
                 ],
               ),
             ),
-            Icon(Icons.north_east, size: 18, color: p.line),
           ],
         ),
       ),
@@ -299,7 +301,7 @@ class _SearchPageState extends State<SearchPage> {
             Text(
               S.t('no_results'),
               style: TextStyle(
-                fontSize: 20,
+                fontSize: 22,
                 fontWeight: FontWeight.w700,
                 color: p.ink,
               ),

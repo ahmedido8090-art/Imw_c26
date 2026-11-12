@@ -73,7 +73,7 @@ class DirectionsSheet extends StatelessWidget {
                             children: [
                               Icon(note.$1, size: 15, color: p.muted),
                               const SizedBox(width: 6),
-                              Expanded(child: Text(note.$2, style: TextStyle(fontFamily: 'Arial', fontSize: 12.5, color: p.muted))),
+                              Expanded(child: Text(note.$2, style: TextStyle(fontFamily: 'Arial', fontSize: 12, color: p.muted))),
                             ],
                           ),
                         ],
@@ -94,7 +94,7 @@ class DirectionsSheet extends StatelessWidget {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                   activeThumbColor: p.accent,
                   secondary: Icon(avoid ? Icons.accessible_forward : Icons.accessible, color: p.accent),
-                  title: Text(S.t('avoid_stairs'), style: const TextStyle(fontFamily: 'Arial', fontWeight: FontWeight.w800, fontSize: 14.5)),
+                  title: Text(S.t('avoid_stairs'), style: const TextStyle(fontFamily: 'Arial', fontWeight: FontWeight.w800, fontSize: 14)),
                   value: avoid,
                   onChanged: onToggleStairs,
                 ),
@@ -120,8 +120,8 @@ class DirectionsSheet extends StatelessWidget {
                     onTap: () => onStepTap(s),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     leading: CircleAvatar(radius: 19, backgroundColor: last ? p.gold : p.accent, child: Icon(s.icon, size: 20, color: p.surface)),
-                    title: Text(S.step(s), style: TextStyle(fontFamily: 'Arial', fontWeight: FontWeight.w700, fontSize: 15, color: p.ink)),
-                    subtitle: s.meters > 4 ? Text(S.distance(s.meters), style: TextStyle(fontFamily: 'Arial', fontSize: 12.5, color: p.muted)) : null,
+                    title: Text(S.step(s), style: TextStyle(fontFamily: 'Arial', fontWeight: FontWeight.w700, fontSize: 16, color: p.ink)),
+                    subtitle: s.meters > 4 ? Text(S.distance(s.meters), style: TextStyle(fontFamily: 'Arial', fontSize: 12, color: p.muted)) : null,
                   );
                 },
               ),
@@ -139,7 +139,7 @@ class DirectionsSheet extends StatelessWidget {
     children: [
       Icon(icon, size: 16, color: p.muted),
       const SizedBox(width: 5),
-      Text(text, style: TextStyle(fontFamily: 'Arial', fontSize: 13.5, color: p.muted, fontWeight: FontWeight.w700)),
+      Text(text, style: TextStyle(fontFamily: 'Arial', fontSize: 14, color: p.muted, fontWeight: FontWeight.w700)),
     ],
   );
   }

@@ -975,7 +975,12 @@ class _MuseumMapCanvasState extends State<MuseumMapCanvas>
     }
     _loadSvg();
     _rebuildLabels();
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    _syncLoop();
   }
+
+  /// The visitor asked for less motion: the route and the beacon stand still.
+  bool _reduceMotion = false;
 
   @override
   void didUpdateWidget(MuseumMapCanvas old) {
@@ -1024,8 +1029,9 @@ class _MuseumMapCanvasState extends State<MuseumMapCanvas>
   /// The route flow / beacon pulse only run while something is showing them.
   void _syncLoop() {
     final need =
-        widget.legs.isNotEmpty ||
-        (widget.originPos != null && widget.originMapId == widget.map.id);
+        !_reduceMotion &&
+        (widget.legs.isNotEmpty ||
+            (widget.originPos != null && widget.originMapId == widget.map.id));
     if (need && !_loop.isAnimating) {
       _loop.repeat();
     } else if (!need && _loop.isAnimating) {

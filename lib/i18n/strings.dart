@@ -37,6 +37,9 @@ class S {
     return s;
   }
 
+  /// "1 stop" / "3 stops" ([key] has a `{key}_one` row for the singular).
+  static String count(String key, int n) => n == 1 && kUi.containsKey('${key}_one') ? t('${key}_one') : t(key, n: n);
+
   // ── names ──────────────────────────────────────────────────────
   /// A place, hall or label name in [l] (search needs every language at once).
   static String nameIn(String en, AppLang l) {
